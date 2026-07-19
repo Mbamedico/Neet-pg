@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QBank</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --ink:#1c2b2e; --paper:#f7f5ef; --panel:#ffffff; --line:#d8d2c4;
+    --teal:#2f5d5a; --teal-deep:#1d3d3b; --amber:#b8842f; --bad:#a1403a;
+    --mono:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+    --serif:"Source Serif 4",Georgia,serif;
+    --sans:"IBM Plex Sans","Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);min-height:100vh;}
+
+  #auth-gate{position:fixed;inset:0;background:var(--paper);z-index:50;display:flex;align-items:center;justify-content:center;}
+  #auth-gate.hidden{display:none;}
+  #auth-box{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:32px 34px;width:340px;}
+  #auth-box h2{font-family:var(--serif);margin:0 0 4px;font-size:22px;}
+  #auth-box p.sub{font-family:var(--mono);font-size:11px;color:#8a8368;margin:0 0 18px;}
+  #auth-box input{width:100%;padding:9px 10px;margin-bottom:10px;border:1px solid var(--line);border-radius:4px;font-family:var(--sans);font-size:13.5px;}
+  #auth-box button{width:100%;padding:10px;border:none;border-radius:4px;background:var(--teal-deep);color:#fff;font-family:var(--sans);font-size:13.5px;cursor:pointer;margin-top:4px;}
+  #auth-box button:hover{background:var(--teal);}
+  #auth-toggle{font-family:var(--mono);font-size:11px;color:var(--teal-deep);text-align:center;margin-top:14px;cursor:pointer;text-decoration:underline;}
+  #auth-error{font-family:var(--mono);font-size:11px;color:var(--bad);margin-top:8px;min-height:14px;}
+  #google-login-btn{background:#fff;color:#1c2b2e;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;gap:8px;}
+  #google-login-btn:hover{background:#f5f3ea;}
+  .or-divider{display:flex;align-items:center;gap:10px;margin:14px 0;font-family:var(--mono);font-size:10.5px;color:#a89f8b;}
+  .or-divider::before,.or-divider::after{content:"";flex:1;height:1px;background:var(--line);}
+
+  header{display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid var(--line);}
+  header .brand{font-family:var(--serif);font-size:22px;}
+  header .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);}
+  #user-bar{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:11.5px;color:#7a7362;}
+  #logout-btn{background:none;border:1px solid var(--line);color:#7a7362;border-radius:3px;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:11px;}
+
+  main{max-width:900px;margin:0 auto;padding:40px;}
+  main h1{font-family:var(--serif);font-size:30px;margin:0 0 6px;}
+  main p.sub{font-family:var(--mono);font-size:12px;color:#7a7362;margin:0 0 28px;}
+
+  #subject-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;}
+  .subject-card{display:block;text-decoration:none;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px;transition:border-color .15s;}
+  .subject-card:hover{border-color:var(--teal);}
+  .subject-card .name{font-family:var(--serif);font-size:18px;margin-bottom:6px;}
+  .subject-card .go{font-family:var(--mono);font-size:11px;color:var(--teal-deep);}
+  #empty-note{font-family:var(--mono);font-size:12px;color:#a89f8b;}
+</style>
+</head>
+<body>
+
+<div id="auth-gate">
+  <div id="auth-box">
+    <h2 id="auth-title">Log in</h2>
+    <p class="sub">QBank</p>
+    <button id="google-login-btn" type="button">Continue with Google</button>
+    <div class="or-divider"><span>or</span></div>
+    <input id="auth-email" type="email" placeholder="Email">
+    <input id="auth-password" type="password" placeholder="Password">
+    <button id="auth-submit">Log in</button>
+    <div id="auth-error"></div>
+    <div id="auth-toggle">Need an account? Sign up</div>
+  </div>
+</div>
+
+<header>
+  <div>
+    <div class="eyebrow">Prepladder Medical App Workspace</div>
+    <div class="brand">QBank</div>
+  </div>
+  <div id="user-bar"><span id="user-email"></span><button id="logout-btn">Log out</button></div>
+</header>
+
+<main>
+  <h1>Choose a subject</h1>
+  <p class="sub">Pick a subject to start answering questions.</p>
+  <div id="subject-grid"></div>
+  <div id="empty-note" style="display:none;">No subjects available yet.</div>
+</main>
+
+<script>
+  // ---- Same Supabase project as every subject HTML file ----
+  const SUPABASE_URL_CONST = "https://lyrcbwtqrlzhsxwjjrhg.supabase.co";
+  const SUPABASE_ANON_KEY_CONST = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5cmNid3Rxcmx6aHN4d2pqcmhnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxMDU5MzgsImV4cCI6MjA5OTY4MTkzOH0.pJHsVHuWv0RTue3kyYlJv6qPuc352piBJnj1JxGjQrw";
+
+  // ---- Map subject_id -> the HTML filename it lives at ----
+  // Add one entry per subject file you generate with json_to_html.py
+  const SUBJECT_FILES = {
+    "psm": "psm.html",
+    "ophthalmology": "ophthalmology.html"
+  };
+
+  const sb = window.supabase.createClient(SUPABASE_URL_CONST, SUPABASE_ANON_KEY_CONST);
+  let authMode = 'login';
+
+  async function refreshSession(){
+    const { data:{ session } } = await sb.auth.getSession();
+    const gate = document.getElementById('auth-gate');
+    gate.classList.toggle('hidden', !!session);
+    if (session){
+      document.getElementById('user-email').textContent = session.user.email;
+      await loadSubjects();
+    }
+  }
+
+  document.getElementById('auth-toggle').addEventListener('click', ()=>{
+    authMode = authMode === 'login' ? 'signup' : 'login';
+    document.getElementById('auth-title').textContent = authMode === 'login' ? 'Log in' : 'Sign up';
+    document.getElementById('auth-submit').textContent = authMode === 'login' ? 'Log in' : 'Sign up';
+    document.getElementById('auth-toggle').textContent = authMode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Log in';
+    document.getElementById('auth-error').textContent = '';
+  });
+
+  document.getElementById('google-login-btn').addEventListener('click', async ()=>{
+    const errEl = document.getElementById('auth-error');
+    errEl.textContent = '';
+    const { error } = await sb.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.href }
+    });
+    if (error) errEl.textContent = error.message;
+  });
+
+  document.getElementById('auth-submit').addEventListener('click', async ()=>{
+    const email = document.getElementById('auth-email').value.trim();
+    const password = document.getElementById('auth-password').value;
+    const errEl = document.getElementById('auth-error');
+    errEl.textContent = '';
+    if (!email || !password){ errEl.textContent = 'Enter email and password.'; return; }
+
+    let result;
+    if (authMode === 'login'){
+      result = await sb.auth.signInWithPassword({ email, password });
+    } else {
+      result = await sb.auth.signUp({ email, password });
+    }
+    if (result.error){
+      errEl.textContent = result.error.message;
+      return;
+    }
+    if (authMode === 'signup' && !result.data.session){
+      errEl.textContent = 'Check your email to confirm your account, then log in.';
+      return;
+    }
+    await refreshSession();
+  });
+
+  document.getElementById('logout-btn').addEventListener('click', async ()=>{
+    await sb.auth.signOut();
+    document.getElementById('auth-gate').classList.remove('hidden');
+  });
+
+  async function loadSubjects(){
+    const grid = document.getElementById('subject-grid');
+    const emptyNote = document.getElementById('empty-note');
+    const { data, error } = await sb.from('subjects').select('id, name').order('name');
+    if (error || !data || !data.length){
+      emptyNote.style.display = 'block';
+      return;
+    }
+    emptyNote.style.display = 'none';
+    grid.innerHTML = data.map(s=>{
+      const href = SUBJECT_FILES[s.id] || (s.id + '.html');
+      return `<a class="subject-card" href="${href}">
+        <div class="name">${s.name}</div>
+        <div class="go">Open qbank &rarr;</div>
+      </a>`;
+    }).join('');
+  }
+
+  refreshSession();
+  sb.auth.onAuthStateChange((event, session)=>{
+    document.getElementById('auth-gate').classList.toggle('hidden', !!session);
+    if (session){
+      document.getElementById('user-email').textContent = session.user.email;
+    }
+  });
+</script>
+</body>
+</html>
